@@ -52,7 +52,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
-COPY --from=builder /build/tests/jwe_tests       /usr/local/bin/jwe_tests
+COPY --from=builder /build/jwe_tests       /usr/local/bin/jwe_tests
 COPY --from=builder /build/basic_usage  /usr/local/bin/basic_usage
 COPY --from=builder /build/jwe_encrypt  /usr/local/bin/jwe_encrypt
 
