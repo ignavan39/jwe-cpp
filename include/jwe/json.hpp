@@ -4,160 +4,198 @@
  * @file json.hpp
  * @brief Минимальный JSON-парсер для работы с JWKS и JWE-заголовком
  *
- * Поддерживает:
- *  - Объекты { "key": value, … }
- *  - Массивы [ value, … ]
- *  - Строки, числа, булевы значения, null
- *
- * Не поддерживает: Unicode escape \uXXXX (только ASCII и UTF-8 literal),
- * вложенность глубже ~64 уровней.
- *
- * Достаточно для разбора JWKS-ответа по RFC 7517.
+ * Намеренно не использует std::variant и std::map — оба ломаются
+ * в GCC 14 / libstdc++ 14 из-за бага PR#114863 (tuple_like concept).
+ * Реализован собственный tagged union без шаблонов.
  */
 
 #include "types.hpp"
+#include <cassert>
 #include <cmath>
+#include <cstring>
 #include <memory>
 #include <string>
 #include <string_view>
-#include <utility>
-#include <variant>
 #include <vector>
 
 namespace jwe::json {
 
 // ─── Forward declarations ──────────────────────────────────────────────────
 
-struct Value;
-struct Object;   // forward-declared; defined after Value
+class Value;
 
-using Null   = std::monostate;
-using Bool   = bool;
-using Number = double;
-using String = std::string;
-using Array  = std::vector<Value>;
+// ─── JSON Object — вектор пар (без std::map) ──────────────────────────────
 
-// ValueVariant держит Object* через unique_ptr чтобы не требовать
-// полного типа Object/Value на этапе объявления variant.
-// Фактически: Null | Bool | Number | String | Array | Object (boxed)
-using ValueVariant = std::variant<Null, Bool, Number, String, Array,
-                                  std::unique_ptr<Object>>;
+class Object {
+public:
+    struct Entry { std::string key; Value* val; };
 
-/**
- * @brief JSON-значение.
- *
- * Object хранится как unique_ptr<Object> внутри variant, чтобы разорвать
- * циклическую зависимость Value→Object→Value при неполных типах.
- * Это также обходит баг GCC 14 libstdc++ PR#114863 (tuple_like + std::map).
- */
-struct Value {
-    ValueVariant v;
+    Object()                          = default;
+    Object(const Object&);
+    Object(Object&&) noexcept         = default;
+    Object& operator=(const Object&);
+    Object& operator=(Object&&)       = default;
+    ~Object();
 
-    Value()            : v(Null{})          {}
-    Value(Null n)      : v(n)               {}
-    Value(Bool b)      : v(b)               {}
-    Value(Number n)    : v(n)               {}
-    Value(String s)    : v(std::move(s))    {}
-    Value(Array a)     : v(std::move(a))    {}
-    Value(std::unique_ptr<Object> o) : v(std::move(o)) {}
+    Value&       operator[](std::string k);
+    [[nodiscard]] const Value* find(std::string_view k) const noexcept;
 
-    // Copy constructor/assignment — нужны из-за unique_ptr
-    Value(const Value& o);
-    Value& operator=(const Value& o);
-    Value(Value&&) noexcept = default;
-    Value& operator=(Value&&) noexcept = default;
-    ~Value() = default;
+    [[nodiscard]] const std::vector<Entry>& entries() const noexcept { return e_; }
 
-    [[nodiscard]] bool isNull()   const noexcept { return std::holds_alternative<Null>(v); }
-    [[nodiscard]] bool isBool()   const noexcept { return std::holds_alternative<Bool>(v); }
-    [[nodiscard]] bool isNumber() const noexcept { return std::holds_alternative<Number>(v); }
-    [[nodiscard]] bool isString() const noexcept { return std::holds_alternative<String>(v); }
-    [[nodiscard]] bool isArray()  const noexcept { return std::holds_alternative<Array>(v); }
-    [[nodiscard]] bool isObject() const noexcept {
-        return std::holds_alternative<std::unique_ptr<Object>>(v);
-    }
+private:
+    std::vector<Entry> e_;
+};
 
-    [[nodiscard]] const String& asString() const {
+// ─── JSON Array ────────────────────────────────────────────────────────────
+
+using Array = std::vector<Value>;
+
+// ─── JSON Value — ручной tagged union ─────────────────────────────────────
+
+class Value {
+public:
+    enum class Tag : uint8_t { Null, Bool, Number, String, Array, Object };
+
+    // ── Конструкторы ────────────────────────────────────────────────────
+
+    Value()  noexcept : tag_(Tag::Null)                    { }
+    explicit Value(bool b)           : tag_(Tag::Bool)     { u_.b = b; }
+    explicit Value(double n)         : tag_(Tag::Number)   { u_.n = n; }
+    explicit Value(std::string s)    : tag_(Tag::String)   { new(&u_.s) std::string(std::move(s)); }
+    explicit Value(jwe::json::Array a) : tag_(Tag::Array)  { new(&u_.a) jwe::json::Array(std::move(a)); }
+    explicit Value(jwe::json::Object o): tag_(Tag::Object) { new(&u_.o) jwe::json::Object(std::move(o)); }
+
+    Value(const Value& o) : tag_(Tag::Null) { copyFrom(o); }
+    Value(Value&& o) noexcept               { moveFrom(std::move(o)); }
+    Value& operator=(const Value& o)        { if (this != &o) { destroy(); copyFrom(o); } return *this; }
+    Value& operator=(Value&& o) noexcept    { if (this != &o) { destroy(); moveFrom(std::move(o)); } return *this; }
+    ~Value()                                { destroy(); }
+
+    // ── Предикаты ───────────────────────────────────────────────────────
+
+    [[nodiscard]] bool isNull()   const noexcept { return tag_ == Tag::Null;   }
+    [[nodiscard]] bool isBool()   const noexcept { return tag_ == Tag::Bool;   }
+    [[nodiscard]] bool isNumber() const noexcept { return tag_ == Tag::Number; }
+    [[nodiscard]] bool isString() const noexcept { return tag_ == Tag::String; }
+    [[nodiscard]] bool isArray()  const noexcept { return tag_ == Tag::Array;  }
+    [[nodiscard]] bool isObject() const noexcept { return tag_ == Tag::Object; }
+
+    // ── Аксессоры ───────────────────────────────────────────────────────
+
+    [[nodiscard]] const std::string& asString() const {
         if (!isString()) throw ParseError("JSON: ожидается строка");
-        return std::get<String>(v);
+        return u_.s;
     }
-    [[nodiscard]] const Array& asArray() const {
+    [[nodiscard]] const jwe::json::Array& asArray() const {
         if (!isArray()) throw ParseError("JSON: ожидается массив");
-        return std::get<Array>(v);
+        return u_.a;
     }
-    [[nodiscard]] const Object& asObject() const;
-
-    [[nodiscard]] const Value& operator[](std::string_view key) const;
-    [[nodiscard]] bool has(std::string_view key) const noexcept;
-};
-
-// ─── Object — после полного определения Value ────────────────────────────
-
-/**
- * @brief JSON-объект: упорядоченный список пар ключ→значение.
- * Реализован как вектор пар (не std::map) чтобы обойти GCC 14 PR#114863.
- */
-struct Object {
-    std::vector<std::pair<std::string, Value>> entries;
-
-    Value& operator[](std::string key) {
-        for (auto& [k, val] : entries)
-            if (k == key) return val;
-        entries.emplace_back(std::move(key), Value{});
-        return entries.back().second;
+    [[nodiscard]] const jwe::json::Object& asObject() const {
+        if (!isObject()) throw ParseError("JSON: ожидается объект");
+        return u_.o;
+    }
+    [[nodiscard]] jwe::json::Object& asObject() {
+        if (!isObject()) throw ParseError("JSON: ожидается объект");
+        return u_.o;
     }
 
-    [[nodiscard]] const Value* find(std::string_view key) const noexcept {
-        for (const auto& [k, val] : entries)
-            if (k == key) return &val;
-        return nullptr;
+    [[nodiscard]] const Value& operator[](std::string_view key) const {
+        const Value* p = asObject().find(key);
+        if (!p) throw ParseError(std::string("JSON: ключ не найден: ") + std::string(key));
+        return *p;
+    }
+    [[nodiscard]] bool has(std::string_view key) const noexcept {
+        return isObject() && u_.o.find(key) != nullptr;
     }
 
-    auto begin() const noexcept { return entries.begin(); }
-    auto end()   const noexcept { return entries.end();   }
-};
+    // ── Внутренний доступ для serialize ─────────────────────────────────
 
-// ─── Определения методов Value, требующих полный тип Object ──────────────
+    [[nodiscard]] bool   getBool()   const noexcept { return u_.b; }
+    [[nodiscard]] double getNumber() const noexcept { return u_.n; }
 
-inline Value::Value(const Value& o) : v(Null{}) {
-    std::visit([this](const auto& alt) {
-        using T = std::decay_t<decltype(alt)>;
-        if constexpr (std::is_same_v<T, std::unique_ptr<Object>>) {
-            v = std::make_unique<Object>(*alt);
-        } else {
-            v = alt;
+private:
+    Tag tag_{Tag::Null};
+
+    union U {
+        bool               b;
+        double             n;
+        std::string        s;
+        jwe::json::Array   a;
+        jwe::json::Object  o;
+        U() {}   // не инициализируем — конструкторы Value делают это сами
+        ~U() {}  // деструкторы вызывает Value::destroy()
+    } u_;
+
+    void destroy() noexcept {
+        switch (tag_) {
+            case Tag::String: u_.s.~basic_string();    break;
+            case Tag::Array:  u_.a.~vector();          break;
+            case Tag::Object: u_.o.~Object();          break;
+            default: break;
         }
-    }, o.v);
+        tag_ = Tag::Null;
+    }
+
+    void copyFrom(const Value& o) {
+        tag_ = o.tag_;
+        switch (tag_) {
+            case Tag::Null:                                    break;
+            case Tag::Bool:   u_.b = o.u_.b;                  break;
+            case Tag::Number: u_.n = o.u_.n;                  break;
+            case Tag::String: new(&u_.s) std::string(o.u_.s); break;
+            case Tag::Array:  new(&u_.a) jwe::json::Array(o.u_.a);  break;
+            case Tag::Object: new(&u_.o) jwe::json::Object(o.u_.o); break;
+        }
+    }
+
+    void moveFrom(Value&& o) noexcept {
+        tag_ = o.tag_;
+        switch (tag_) {
+            case Tag::Null:                                              break;
+            case Tag::Bool:   u_.b = o.u_.b;                            break;
+            case Tag::Number: u_.n = o.u_.n;                            break;
+            case Tag::String: new(&u_.s) std::string(std::move(o.u_.s));break;
+            case Tag::Array:  new(&u_.a) jwe::json::Array(std::move(o.u_.a)); break;
+            case Tag::Object: new(&u_.o) jwe::json::Object(std::move(o.u_.o));break;
+        }
+        o.tag_ = Tag::Null;
+    }
+};
+
+// ─── Object: определения методов (Value уже полный тип) ───────────────────
+
+inline Object::~Object() {
+    for (auto& e : e_) delete e.val;
 }
 
-inline Value& Value::operator=(const Value& o) {
+inline Object::Object(const Object& o) {
+    e_.reserve(o.e_.size());
+    for (const auto& e : o.e_)
+        e_.push_back({e.key, new Value(*e.val)});
+}
+
+inline Object& Object::operator=(const Object& o) {
     if (this != &o) {
-        std::visit([this](const auto& alt) {
-            using T = std::decay_t<decltype(alt)>;
-            if constexpr (std::is_same_v<T, std::unique_ptr<Object>>) {
-                v = std::make_unique<Object>(*alt);
-            } else {
-                v = alt;
-            }
-        }, o.v);
+        for (auto& e : e_) delete e.val;
+        e_.clear();
+        e_.reserve(o.e_.size());
+        for (const auto& e : o.e_)
+            e_.push_back({e.key, new Value(*e.val)});
     }
     return *this;
 }
 
-inline const Object& Value::asObject() const {
-    if (!isObject()) throw ParseError("JSON: ожидается объект");
-    return *std::get<std::unique_ptr<Object>>(v);
+inline Value& Object::operator[](std::string k) {
+    for (auto& e : e_)
+        if (e.key == k) return *e.val;
+    e_.push_back({std::move(k), new Value{}});
+    return *e_.back().val;
 }
 
-inline const Value& Value::operator[](std::string_view key) const {
-    const Value* p = asObject().find(key);
-    if (!p) throw ParseError(std::string("JSON: ключ не найден: ") + std::string(key));
-    return *p;
-}
-
-inline bool Value::has(std::string_view key) const noexcept {
-    if (!isObject()) return false;
-    return std::get<std::unique_ptr<Object>>(v)->find(key) != nullptr;
+inline const Value* Object::find(std::string_view k) const noexcept {
+    for (const auto& e : e_)
+        if (e.key == k) return e.val;
+    return nullptr;
 }
 
 // ─── Парсер ────────────────────────────────────────────────────────────────
@@ -184,38 +222,30 @@ private:
         if (pos_ >= src_.size()) throw ParseError("JSON: неожиданный конец");
         return src_[pos_];
     }
-
-    char next() {
-        char c = peek();
-        ++pos_;
-        return c;
-    }
-
+    char next() { char c = peek(); ++pos_; return c; }
     void expect(char c) {
         if (next() != c)
             throw ParseError(std::string("JSON: ожидается '") + c + "'");
     }
-
     void skipWs() noexcept {
         while (pos_ < src_.size() &&
-               (src_[pos_] == ' ' || src_[pos_] == '\t' ||
-                src_[pos_] == '\n'|| src_[pos_] == '\r'))
-            ++pos_;
+               (src_[pos_]==' '||src_[pos_]=='\t'||
+                src_[pos_]=='\n'||src_[pos_]=='\r')) ++pos_;
     }
 
     Value parseValue() {
         skipWs();
         char c = peek();
-        if (c == '"')  return parseString();
-        if (c == '{')  return parseObject();
-        if (c == '[')  return parseArray();
-        if (c == 't')  { pos_+=4; return Value{true};  }
-        if (c == 'f')  { pos_+=5; return Value{false}; }
-        if (c == 'n')  { pos_+=4; return Value{};      }
-        return parseNumber();
+        if (c == '"') return Value{parseString()};
+        if (c == '{') return parseObject();
+        if (c == '[') return parseArray();
+        if (c == 't') { pos_+=4; return Value{true};  }
+        if (c == 'f') { pos_+=5; return Value{false}; }
+        if (c == 'n') { pos_+=4; return Value{};      }
+        return Value{parseNumber()};
     }
 
-    String parseString() {
+    std::string parseString() {
         expect('"');
         std::string s;
         while (true) {
@@ -224,36 +254,27 @@ private:
             if (c == '\\') {
                 char e = next();
                 switch (e) {
-                    case '"': s += '"'; break;
-                    case '\\':s += '\\';break;
-                    case '/': s += '/'; break;
-                    case 'n': s += '\n';break;
-                    case 'r': s += '\r';break;
-                    case 't': s += '\t';break;
-                    case 'b': s += '\b';break;
-                    case 'f': s += '\f';break;
-                    default:  s += e;   break;
+                    case '"': s+='"';  break; case '\\': s+='\\'; break;
+                    case '/': s+='/';  break; case 'n':  s+='\n'; break;
+                    case 'r': s+='\r'; break; case 't':  s+='\t'; break;
+                    case 'b': s+='\b'; break; case 'f':  s+='\f'; break;
+                    default:  s+=e;    break;
                 }
-            } else {
-                s += c;
-            }
+            } else { s += c; }
         }
         return s;
     }
 
     Value parseObject() {
         expect('{');
-        auto obj = std::make_unique<Object>();
+        Object obj;
         skipWs();
         if (peek() == '}') { ++pos_; return Value{std::move(obj)}; }
         while (true) {
             skipWs();
             auto key = parseString();
-            skipWs();
-            expect(':');
-            skipWs();
-            auto val = parseValue();
-            (*obj)[std::move(key)] = std::move(val);
+            skipWs(); expect(':'); skipWs();
+            obj[std::move(key)] = parseValue();
             skipWs();
             char sep = peek();
             if (sep == '}') { ++pos_; break; }
@@ -263,11 +284,11 @@ private:
         return Value{std::move(obj)};
     }
 
-    Array parseArray() {
+    Value parseArray() {
         expect('[');
         Array arr;
         skipWs();
-        if (peek() == ']') { ++pos_; return arr; }
+        if (peek() == ']') { ++pos_; return Value{std::move(arr)}; }
         while (true) {
             skipWs();
             arr.push_back(parseValue());
@@ -277,21 +298,21 @@ private:
             if (sep != ',') throw ParseError("JSON: ожидается ',' или ']'");
             ++pos_;
         }
-        return arr;
+        return Value{std::move(arr)};
     }
 
-    Number parseNumber() {
+    double parseNumber() {
         std::size_t start = pos_;
         if (pos_ < src_.size() && src_[pos_] == '-') ++pos_;
-        while (pos_ < src_.size() && src_[pos_] >= '0' && src_[pos_] <= '9') ++pos_;
+        while (pos_ < src_.size() && src_[pos_]>='0' && src_[pos_]<='9') ++pos_;
         if (pos_ < src_.size() && src_[pos_] == '.') {
             ++pos_;
-            while (pos_ < src_.size() && src_[pos_] >= '0' && src_[pos_] <= '9') ++pos_;
+            while (pos_ < src_.size() && src_[pos_]>='0' && src_[pos_]<='9') ++pos_;
         }
-        if (pos_ < src_.size() && (src_[pos_] == 'e' || src_[pos_] == 'E')) {
+        if (pos_ < src_.size() && (src_[pos_]=='e'||src_[pos_]=='E')) {
             ++pos_;
-            if (pos_ < src_.size() && (src_[pos_] == '+' || src_[pos_] == '-')) ++pos_;
-            while (pos_ < src_.size() && src_[pos_] >= '0' && src_[pos_] <= '9') ++pos_;
+            if (pos_ < src_.size() && (src_[pos_]=='+'||src_[pos_]=='-')) ++pos_;
+            while (pos_ < src_.size() && src_[pos_]>='0' && src_[pos_]<='9') ++pos_;
         }
         if (pos_ == start) throw ParseError("JSON: ожидается число");
         return std::stod(std::string(src_.substr(start, pos_ - start)));
@@ -304,46 +325,45 @@ private:
     return Parser(src).parse();
 }
 
-// ─── Сериализация (для формирования JWE Protected Header) ──────────────────
+// ─── Сериализация ──────────────────────────────────────────────────────────
 
 [[nodiscard]] inline std::string serialize(const Value& v) {
     if (v.isNull())   return "null";
-    if (v.isBool())   return std::get<Bool>(v.v) ? "true" : "false";
+    if (v.isBool())   return v.getBool() ? "true" : "false";
     if (v.isNumber()) {
-        auto n = std::get<Number>(v.v);
+        double n = v.getNumber();
         if (n == std::floor(n) && std::abs(n) < 1e15)
             return std::to_string(static_cast<long long>(n));
         return std::to_string(n);
     }
     if (v.isString()) {
         std::string s = "\"";
-        for (char c : std::get<String>(v.v)) {
-            if      (c == '"')  s += "\\\"";
-            else if (c == '\\') s += "\\\\";
-            else if (c == '\n') s += "\\n";
-            else if (c == '\r') s += "\\r";
-            else if (c == '\t') s += "\\t";
-            else                s += c;
+        for (char c : v.asString()) {
+            if      (c=='"')  s+="\\\"";
+            else if (c=='\\') s+="\\\\";
+            else if (c=='\n') s+="\\n";
+            else if (c=='\r') s+="\\r";
+            else if (c=='\t') s+="\\t";
+            else              s+=c;
         }
-        s += '"';
-        return s;
+        return s + '"';
     }
     if (v.isArray()) {
         std::string s = "[";
         bool first = true;
-        for (const auto& el : std::get<Array>(v.v)) {
+        for (const auto& el : v.asArray()) {
             if (!first) s += ',';
             s += serialize(el);
             first = false;
         }
         return s + "]";
     }
-    // Object (stored as unique_ptr<Object>)
+    // Object
     std::string s = "{";
     bool first = true;
-    for (const auto& entry : v.asObject().entries) {
+    for (const auto& e : v.asObject().entries()) {
         if (!first) s += ',';
-        s += '"' + entry.first + "\":" + serialize(entry.second);
+        s += '"' + e.key + "\":" + serialize(*e.val);
         first = false;
     }
     return s + "}";
