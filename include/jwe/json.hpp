@@ -17,7 +17,6 @@
 
 #include "types.hpp"
 #include <cmath>
-#include <map>
 #include <memory>
 #include <string>
 #include <string_view>
@@ -27,77 +26,139 @@
 
 namespace jwe::json {
 
-// ─── Тип значения ─────────────────────────────────────────────────────────
+// ─── Forward declarations ──────────────────────────────────────────────────
 
 struct Value;
+struct Object;   // forward-declared; defined after Value
 
 using Null   = std::monostate;
 using Bool   = bool;
 using Number = double;
 using String = std::string;
 using Array  = std::vector<Value>;
-using Object = std::map<std::string, Value>;
 
-// Внутренний вариант — не выставляем наружу, чтобы не триггерить
-// GCC 14 / libstdc++ 14 баг: std::variant subclass считается tuple_like
-// и ломает std::map::operator[], insert_or_assign и forward_as_tuple.
-using ValueVariant = std::variant<Null, Bool, Number, String, Array, Object>;
+// ValueVariant держит Object* через unique_ptr чтобы не требовать
+// полного типа Object/Value на этапе объявления variant.
+// Фактически: Null | Bool | Number | String | Array | Object (boxed)
+using ValueVariant = std::variant<Null, Bool, Number, String, Array,
+                                  std::unique_ptr<Object>>;
 
 /**
- * @brief JSON-значение. Хранит вариант как член (не наследует от него),
- *        чтобы избежать GCC 14 tuple_like deduction bug.
+ * @brief JSON-значение.
+ *
+ * Object хранится как unique_ptr<Object> внутри variant, чтобы разорвать
+ * циклическую зависимость Value→Object→Value при неполных типах.
+ * Это также обходит баг GCC 14 libstdc++ PR#114863 (tuple_like + std::map).
  */
 struct Value {
     ValueVariant v;
 
-    // ─── Конструкторы ────────────────────────────────────────────────────
+    Value()            : v(Null{})          {}
+    Value(Null n)      : v(n)               {}
+    Value(Bool b)      : v(b)               {}
+    Value(Number n)    : v(n)               {}
+    Value(String s)    : v(std::move(s))    {}
+    Value(Array a)     : v(std::move(a))    {}
+    Value(std::unique_ptr<Object> o) : v(std::move(o)) {}
 
-    Value()                          : v(Null{})                {}
-    Value(Null n)                    : v(n)                     {}
-    Value(Bool b)                    : v(b)                     {}
-    Value(Number n)                  : v(n)                     {}
-    Value(String s)                  : v(std::move(s))          {}
-    Value(Array a)                   : v(std::move(a))          {}
-    Value(Object o)                  : v(std::move(o))          {}
-
-    // ─── Аксессоры ────────────────────────────────────────────────────
+    // Copy constructor/assignment — нужны из-за unique_ptr
+    Value(const Value& o);
+    Value& operator=(const Value& o);
+    Value(Value&&) noexcept = default;
+    Value& operator=(Value&&) noexcept = default;
+    ~Value() = default;
 
     [[nodiscard]] bool isNull()   const noexcept { return std::holds_alternative<Null>(v); }
     [[nodiscard]] bool isBool()   const noexcept { return std::holds_alternative<Bool>(v); }
     [[nodiscard]] bool isNumber() const noexcept { return std::holds_alternative<Number>(v); }
     [[nodiscard]] bool isString() const noexcept { return std::holds_alternative<String>(v); }
     [[nodiscard]] bool isArray()  const noexcept { return std::holds_alternative<Array>(v); }
-    [[nodiscard]] bool isObject() const noexcept { return std::holds_alternative<Object>(v); }
+    [[nodiscard]] bool isObject() const noexcept {
+        return std::holds_alternative<std::unique_ptr<Object>>(v);
+    }
 
     [[nodiscard]] const String& asString() const {
         if (!isString()) throw ParseError("JSON: ожидается строка");
         return std::get<String>(v);
     }
-
     [[nodiscard]] const Array& asArray() const {
         if (!isArray()) throw ParseError("JSON: ожидается массив");
         return std::get<Array>(v);
     }
+    [[nodiscard]] const Object& asObject() const;
 
-    [[nodiscard]] const Object& asObject() const {
-        if (!isObject()) throw ParseError("JSON: ожидается объект");
-        return std::get<Object>(v);
-    }
-
-    [[nodiscard]] const Value& operator[](std::string_view key) const {
-        const auto& obj = asObject();
-        auto it = obj.find(std::string(key));
-        if (it == obj.end())
-            throw ParseError(std::string("JSON: ключ не найден: ") + std::string(key));
-        return it->second;
-    }
-
-    [[nodiscard]] bool has(std::string_view key) const noexcept {
-        if (!isObject()) return false;
-        const auto& obj = std::get<Object>(v);
-        return obj.find(std::string(key)) != obj.end();
-    }
+    [[nodiscard]] const Value& operator[](std::string_view key) const;
+    [[nodiscard]] bool has(std::string_view key) const noexcept;
 };
+
+// ─── Object — после полного определения Value ────────────────────────────
+
+/**
+ * @brief JSON-объект: упорядоченный список пар ключ→значение.
+ * Реализован как вектор пар (не std::map) чтобы обойти GCC 14 PR#114863.
+ */
+struct Object {
+    std::vector<std::pair<std::string, Value>> entries;
+
+    Value& operator[](std::string key) {
+        for (auto& [k, val] : entries)
+            if (k == key) return val;
+        entries.emplace_back(std::move(key), Value{});
+        return entries.back().second;
+    }
+
+    [[nodiscard]] const Value* find(std::string_view key) const noexcept {
+        for (const auto& [k, val] : entries)
+            if (k == key) return &val;
+        return nullptr;
+    }
+
+    auto begin() const noexcept { return entries.begin(); }
+    auto end()   const noexcept { return entries.end();   }
+};
+
+// ─── Определения методов Value, требующих полный тип Object ──────────────
+
+inline Value::Value(const Value& o) : v(Null{}) {
+    std::visit([this](const auto& alt) {
+        using T = std::decay_t<decltype(alt)>;
+        if constexpr (std::is_same_v<T, std::unique_ptr<Object>>) {
+            v = std::make_unique<Object>(*alt);
+        } else {
+            v = alt;
+        }
+    }, o.v);
+}
+
+inline Value& Value::operator=(const Value& o) {
+    if (this != &o) {
+        std::visit([this](const auto& alt) {
+            using T = std::decay_t<decltype(alt)>;
+            if constexpr (std::is_same_v<T, std::unique_ptr<Object>>) {
+                v = std::make_unique<Object>(*alt);
+            } else {
+                v = alt;
+            }
+        }, o.v);
+    }
+    return *this;
+}
+
+inline const Object& Value::asObject() const {
+    if (!isObject()) throw ParseError("JSON: ожидается объект");
+    return *std::get<std::unique_ptr<Object>>(v);
+}
+
+inline const Value& Value::operator[](std::string_view key) const {
+    const Value* p = asObject().find(key);
+    if (!p) throw ParseError(std::string("JSON: ключ не найден: ") + std::string(key));
+    return *p;
+}
+
+inline bool Value::has(std::string_view key) const noexcept {
+    if (!isObject()) return false;
+    return std::get<std::unique_ptr<Object>>(v)->find(key) != nullptr;
+}
 
 // ─── Парсер ────────────────────────────────────────────────────────────────
 
@@ -180,11 +241,11 @@ private:
         return s;
     }
 
-    Object parseObject() {
+    Value parseObject() {
         expect('{');
-        Object obj;
+        auto obj = std::make_unique<Object>();
         skipWs();
-        if (peek() == '}') { ++pos_; return obj; }
+        if (peek() == '}') { ++pos_; return Value{std::move(obj)}; }
         while (true) {
             skipWs();
             auto key = parseString();
@@ -192,14 +253,14 @@ private:
             expect(':');
             skipWs();
             auto val = parseValue();
-            obj[std::move(key)] = std::move(val);
+            (*obj)[std::move(key)] = std::move(val);
             skipWs();
             char sep = peek();
             if (sep == '}') { ++pos_; break; }
             if (sep != ',') throw ParseError("JSON: ожидается ',' или '}'");
             ++pos_;
         }
-        return obj;
+        return Value{std::move(obj)};
     }
 
     Array parseArray() {
@@ -277,12 +338,12 @@ private:
         }
         return s + "]";
     }
-    // Object
+    // Object (stored as unique_ptr<Object>)
     std::string s = "{";
     bool first = true;
-    for (const auto& [k, val] : std::get<Object>(v.v)) {
+    for (const auto& entry : v.asObject().entries) {
         if (!first) s += ',';
-        s += '"' + k + "\":" + serialize(val);
+        s += '"' + entry.first + "\":" + serialize(entry.second);
         first = false;
     }
     return s + "}";

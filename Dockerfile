@@ -21,14 +21,14 @@ LABEL description="jwe-cpp build stage — GCC 13, CMake, C++23"
 
 # Установка инструментов сборки
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        g++-13           \
+        g++-14           \
         cmake            \
         make             \
         ca-certificates  \
     && rm -rf /var/lib/apt/lists/*
 
-# Используем GCC 13 по умолчанию
-ENV CC=gcc-13 CXX=g++-13
+# Используем GCC 14 по умолчанию
+ENV CC=gcc-14 CXX=g++-14
 
 WORKDIR /src
 

@@ -8,7 +8,7 @@ on:
 
 jobs:
   # ─── Linux / GCC 13 ───────────────────────────────────────────────────
-  build-linux-gcc:
+  build-linux-gcc13:
     name: Linux · GCC 13 · C++23
     runs-on: ubuntu-24.04
     steps:
@@ -23,6 +23,32 @@ jobs:
         run: |
           cmake -B build \
                 -DCMAKE_CXX_COMPILER=g++-13 \
+                -DCMAKE_BUILD_TYPE=Release   \
+                -DJWE_BUILD_TESTS=ON         \
+                -DJWE_BUILD_EXAMPLES=ON
+
+      - name: Сборка
+        run: cmake --build build --parallel
+
+      - name: Тесты
+        run: cd build && ctest --output-on-failure
+
+  # ─── Linux / GCC 14 (тот же компилятор что ломал нас) ─────────────────
+  build-linux-gcc14:
+    name: Linux · GCC 14 · C++23
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Установка зависимостей
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y g++-14 cmake
+
+      - name: Конфигурация CMake
+        run: |
+          cmake -B build \
+                -DCMAKE_CXX_COMPILER=g++-14 \
                 -DCMAKE_BUILD_TYPE=Release   \
                 -DJWE_BUILD_TESTS=ON         \
                 -DJWE_BUILD_EXAMPLES=ON
