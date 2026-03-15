@@ -54,16 +54,16 @@ using Array = std::vector<Value>;
 
 class Value {
 public:
-    enum class Tag : uint8_t { Null, Bool, Number, String, Array, Object };
+    enum class Tag : uint8_t { Null, Bool, Num, Str, Arr, Obj };
 
     // ── Конструкторы ────────────────────────────────────────────────────
 
     Value()  noexcept : tag_(Tag::Null)                    { }
     explicit Value(bool b)           : tag_(Tag::Bool)     { u_.b = b; }
-    explicit Value(double n)         : tag_(Tag::Number)   { u_.n = n; }
-    explicit Value(std::string s)    : tag_(Tag::String)   { new(&u_.s) std::string(std::move(s)); }
-    explicit Value(jwe::json::Array a) : tag_(Tag::Array)  { new(&u_.a) jwe::json::Array(std::move(a)); }
-    explicit Value(jwe::json::Object o): tag_(Tag::Object) { new(&u_.o) jwe::json::Object(std::move(o)); }
+    explicit Value(double n)         : tag_(Tag::Num)   { u_.n = n; }
+    explicit Value(std::string s)    : tag_(Tag::Str)   { new(&u_.s) std::string(std::move(s)); }
+    explicit Value(jwe::json::Array a) : tag_(Tag::Arr)  { new(&u_.a) jwe::json::Array(std::move(a)); }
+    explicit Value(jwe::json::Object o): tag_(Tag::Obj) { new(&u_.o) jwe::json::Object(std::move(o)); }
 
     Value(const Value& o) : tag_(Tag::Null) { copyFrom(o); }
     Value(Value&& o) noexcept               { moveFrom(std::move(o)); }
@@ -75,10 +75,10 @@ public:
 
     [[nodiscard]] bool isNull()   const noexcept { return tag_ == Tag::Null;   }
     [[nodiscard]] bool isBool()   const noexcept { return tag_ == Tag::Bool;   }
-    [[nodiscard]] bool isNumber() const noexcept { return tag_ == Tag::Number; }
-    [[nodiscard]] bool isString() const noexcept { return tag_ == Tag::String; }
-    [[nodiscard]] bool isArray()  const noexcept { return tag_ == Tag::Array;  }
-    [[nodiscard]] bool isObject() const noexcept { return tag_ == Tag::Object; }
+    [[nodiscard]] bool isNumber() const noexcept { return tag_ == Tag::Num; }
+    [[nodiscard]] bool isString() const noexcept { return tag_ == Tag::Str; }
+    [[nodiscard]] bool isArray()  const noexcept { return tag_ == Tag::Arr;  }
+    [[nodiscard]] bool isObject() const noexcept { return tag_ == Tag::Obj; }
 
     // ── Аксессоры ───────────────────────────────────────────────────────
 
@@ -128,9 +128,9 @@ private:
 
     void destroy() noexcept {
         switch (tag_) {
-            case Tag::String: u_.s.~basic_string();    break;
-            case Tag::Array:  u_.a.~vector();          break;
-            case Tag::Object: u_.o.~Object();          break;
+            case Tag::Str: u_.s.~basic_string();    break;
+            case Tag::Arr:  u_.a.~vector();          break;
+            case Tag::Obj: u_.o.~Object();          break;
             default: break;
         }
         tag_ = Tag::Null;
@@ -141,10 +141,10 @@ private:
         switch (tag_) {
             case Tag::Null:                                    break;
             case Tag::Bool:   u_.b = o.u_.b;                  break;
-            case Tag::Number: u_.n = o.u_.n;                  break;
-            case Tag::String: new(&u_.s) std::string(o.u_.s); break;
-            case Tag::Array:  new(&u_.a) jwe::json::Array(o.u_.a);  break;
-            case Tag::Object: new(&u_.o) jwe::json::Object(o.u_.o); break;
+            case Tag::Num: u_.n = o.u_.n;                  break;
+            case Tag::Str: new(&u_.s) std::string(o.u_.s); break;
+            case Tag::Arr:  new(&u_.a) jwe::json::Array(o.u_.a);  break;
+            case Tag::Obj: new(&u_.o) jwe::json::Object(o.u_.o); break;
         }
     }
 
@@ -153,10 +153,10 @@ private:
         switch (tag_) {
             case Tag::Null:                                              break;
             case Tag::Bool:   u_.b = o.u_.b;                            break;
-            case Tag::Number: u_.n = o.u_.n;                            break;
-            case Tag::String: new(&u_.s) std::string(std::move(o.u_.s));break;
-            case Tag::Array:  new(&u_.a) jwe::json::Array(std::move(o.u_.a)); break;
-            case Tag::Object: new(&u_.o) jwe::json::Object(std::move(o.u_.o));break;
+            case Tag::Num: u_.n = o.u_.n;                            break;
+            case Tag::Str: new(&u_.s) std::string(std::move(o.u_.s));break;
+            case Tag::Arr:  new(&u_.a) jwe::json::Array(std::move(o.u_.a)); break;
+            case Tag::Obj: new(&u_.o) jwe::json::Object(std::move(o.u_.o));break;
         }
         o.tag_ = Tag::Null;
     }
