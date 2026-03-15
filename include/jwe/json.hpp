@@ -38,31 +38,50 @@ using String = std::string;
 using Array  = std::vector<Value>;
 using Object = std::map<std::string, Value>;
 
-struct Value : std::variant<Null, Bool, Number, String, Array, Object> {
-    using variant::variant;
+// Внутренний вариант — не выставляем наружу, чтобы не триггерить
+// GCC 14 / libstdc++ 14 баг: std::variant subclass считается tuple_like
+// и ломает std::map::operator[], insert_or_assign и forward_as_tuple.
+using ValueVariant = std::variant<Null, Bool, Number, String, Array, Object>;
+
+/**
+ * @brief JSON-значение. Хранит вариант как член (не наследует от него),
+ *        чтобы избежать GCC 14 tuple_like deduction bug.
+ */
+struct Value {
+    ValueVariant v;
+
+    // ─── Конструкторы ────────────────────────────────────────────────────
+
+    Value()                          : v(Null{})                {}
+    Value(Null n)                    : v(n)                     {}
+    Value(Bool b)                    : v(b)                     {}
+    Value(Number n)                  : v(n)                     {}
+    Value(String s)                  : v(std::move(s))          {}
+    Value(Array a)                   : v(std::move(a))          {}
+    Value(Object o)                  : v(std::move(o))          {}
 
     // ─── Аксессоры ────────────────────────────────────────────────────
 
-    [[nodiscard]] bool isNull()   const noexcept { return std::holds_alternative<Null>(*this); }
-    [[nodiscard]] bool isBool()   const noexcept { return std::holds_alternative<Bool>(*this); }
-    [[nodiscard]] bool isNumber() const noexcept { return std::holds_alternative<Number>(*this); }
-    [[nodiscard]] bool isString() const noexcept { return std::holds_alternative<String>(*this); }
-    [[nodiscard]] bool isArray()  const noexcept { return std::holds_alternative<Array>(*this); }
-    [[nodiscard]] bool isObject() const noexcept { return std::holds_alternative<Object>(*this); }
+    [[nodiscard]] bool isNull()   const noexcept { return std::holds_alternative<Null>(v); }
+    [[nodiscard]] bool isBool()   const noexcept { return std::holds_alternative<Bool>(v); }
+    [[nodiscard]] bool isNumber() const noexcept { return std::holds_alternative<Number>(v); }
+    [[nodiscard]] bool isString() const noexcept { return std::holds_alternative<String>(v); }
+    [[nodiscard]] bool isArray()  const noexcept { return std::holds_alternative<Array>(v); }
+    [[nodiscard]] bool isObject() const noexcept { return std::holds_alternative<Object>(v); }
 
     [[nodiscard]] const String& asString() const {
         if (!isString()) throw ParseError("JSON: ожидается строка");
-        return std::get<String>(*this);
+        return std::get<String>(v);
     }
 
     [[nodiscard]] const Array& asArray() const {
         if (!isArray()) throw ParseError("JSON: ожидается массив");
-        return std::get<Array>(*this);
+        return std::get<Array>(v);
     }
 
     [[nodiscard]] const Object& asObject() const {
         if (!isObject()) throw ParseError("JSON: ожидается объект");
-        return std::get<Object>(*this);
+        return std::get<Object>(v);
     }
 
     [[nodiscard]] const Value& operator[](std::string_view key) const {
@@ -75,7 +94,7 @@ struct Value : std::variant<Null, Bool, Number, String, Array, Object> {
 
     [[nodiscard]] bool has(std::string_view key) const noexcept {
         if (!isObject()) return false;
-        const auto& obj = std::get<Object>(*this);
+        const auto& obj = std::get<Object>(v);
         return obj.find(std::string(key)) != obj.end();
     }
 };
@@ -172,8 +191,8 @@ private:
             skipWs();
             expect(':');
             skipWs();
-            auto val = parseValue();          // вычисляем до вставки
-            obj.insert_or_assign(key, std::move(val));
+            auto val = parseValue();
+            obj[std::move(key)] = std::move(val);
             skipWs();
             char sep = peek();
             if (sep == '}') { ++pos_; break; }
@@ -228,17 +247,16 @@ private:
 
 [[nodiscard]] inline std::string serialize(const Value& v) {
     if (v.isNull())   return "null";
-    if (v.isBool())   return std::get<Bool>(v) ? "true" : "false";
+    if (v.isBool())   return std::get<Bool>(v.v) ? "true" : "false";
     if (v.isNumber()) {
-        auto n = std::get<Number>(v);
-        // Печатаем без экспоненциальной нотации для целых
+        auto n = std::get<Number>(v.v);
         if (n == std::floor(n) && std::abs(n) < 1e15)
             return std::to_string(static_cast<long long>(n));
         return std::to_string(n);
     }
     if (v.isString()) {
         std::string s = "\"";
-        for (char c : std::get<String>(v)) {
+        for (char c : std::get<String>(v.v)) {
             if      (c == '"')  s += "\\\"";
             else if (c == '\\') s += "\\\\";
             else if (c == '\n') s += "\\n";
@@ -252,7 +270,7 @@ private:
     if (v.isArray()) {
         std::string s = "[";
         bool first = true;
-        for (const auto& el : std::get<Array>(v)) {
+        for (const auto& el : std::get<Array>(v.v)) {
             if (!first) s += ',';
             s += serialize(el);
             first = false;
@@ -262,7 +280,7 @@ private:
     // Object
     std::string s = "{";
     bool first = true;
-    for (const auto& [k, val] : std::get<Object>(v)) {
+    for (const auto& [k, val] : std::get<Object>(v.v)) {
         if (!first) s += ',';
         s += '"' + k + "\":" + serialize(val);
         first = false;
