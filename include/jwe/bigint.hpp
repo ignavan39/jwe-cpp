@@ -34,6 +34,7 @@ public:
         BigInt r;
         r.d_.clear();
         std::size_t sz = b.size();
+        // Обрабатываем по 4 байта в little-endian порядке цифр (от конца к началу)
         if (sz >= 4u) {
             std::size_t i = sz - 4u;
             while (true) {
@@ -56,6 +57,7 @@ public:
         return r;
     }
 
+    /// Экспорт в big-endian байты (ведущие нули обрезаются, если !padTo)
     [[nodiscard]] Bytes toBytes(std::size_t padTo = 0) const {
         Bytes out;
         for (auto it = d_.rbegin(); it != d_.rend(); ++it) {
@@ -64,6 +66,7 @@ public:
             out.push_back(uint8_t(*it >>  8));
             out.push_back(uint8_t(*it));
         }
+        // Убираем ведущие нули
         while (out.size() > 1 && out.front() == 0) out.erase(out.begin());
         // Паддинг нулями слева до нужной длины
         if (out.size() < padTo)

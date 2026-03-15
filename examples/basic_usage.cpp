@@ -17,6 +17,7 @@
 #include <iomanip>
 #include <iostream>
 
+// ─── Вспомогательная функция вывода ────────────────────────────────────────
 
 static void printSeparator(const char* title = nullptr) {
     std::cout << "\n";

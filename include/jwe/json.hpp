@@ -21,6 +21,7 @@
 #include <memory>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <variant>
 #include <vector>
 
@@ -171,7 +172,8 @@ private:
             skipWs();
             expect(':');
             skipWs();
-            obj[key] = parseValue();
+            auto val = parseValue();          // вычисляем до вставки
+            obj.insert_or_assign(key, std::move(val));
             skipWs();
             char sep = peek();
             if (sep == '}') { ++pos_; break; }
