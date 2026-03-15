@@ -98,15 +98,14 @@ public:
         while (bufLen_ < 56) buf_[bufLen_++] = 0;
 
         // Длина в битах (big-endian 64-bit)
-        for (int i = 7; i >= 0; --i) {
-            buf_[56 + (7 - i)] = uint8_t(count_ >> (i * 8));
-        }
+        for (std::size_t i = 0; i < 8; ++i)
+            buf_[56 + i] = uint8_t(count_ >> ((7u - i) * 8u));
         processBlock();
 
         Digest out{};
-        for (int i = 0; i < 8; ++i)
-            for (int j = 3; j >= 0; --j)
-                out[i * 4 + (3 - j)] = uint8_t(state_[i] >> (j * 8));
+        for (std::size_t i = 0; i < 8; ++i)
+            for (std::size_t j = 0; j < 4; ++j)
+                out[i * 4u + j] = uint8_t(state_[i] >> ((3u - j) * 8u));
         return out;
     }
 
@@ -136,17 +135,17 @@ private:
         using namespace detail;
 
         std::array<uint32_t, 64> w{};
-        for (int i = 0; i < 16; ++i)
-            w[i] = (uint32_t(buf_[i*4]) << 24) | (uint32_t(buf_[i*4+1]) << 16) |
-                   (uint32_t(buf_[i*4+2]) << 8) | uint32_t(buf_[i*4+3]);
-        for (int i = 16; i < 64; ++i) {
-            uint32_t s0 = rotr(w[i-15], 7) ^ rotr(w[i-15], 18) ^ (w[i-15] >> 3);
-            uint32_t s1 = rotr(w[i- 2],17) ^ rotr(w[i- 2], 19) ^ (w[i- 2] >> 10);
-            w[i] = w[i-16] + s0 + w[i-7] + s1;
+        for (std::size_t i = 0; i < 16; ++i)
+            w[i] = (uint32_t(buf_[i*4u])   << 24) | (uint32_t(buf_[i*4u+1u]) << 16) |
+                   (uint32_t(buf_[i*4u+2u]) <<  8) |  uint32_t(buf_[i*4u+3u]);
+        for (std::size_t i = 16; i < 64; ++i) {
+            uint32_t s0 = rotr(w[i-15u], 7) ^ rotr(w[i-15u], 18) ^ (w[i-15u] >> 3);
+            uint32_t s1 = rotr(w[i- 2u],17) ^ rotr(w[i- 2u], 19) ^ (w[i- 2u] >> 10);
+            w[i] = w[i-16u] + s0 + w[i-7u] + s1;
         }
 
         auto [a,b,c,d,e,f,g,h] = state_;
-        for (int i = 0; i < 64; ++i) {
+        for (std::size_t i = 0; i < 64; ++i) {
             uint32_t S1  = rotr(e, 6) ^ rotr(e, 11) ^ rotr(e, 25);
             uint32_t ch  = (e & f) ^ (~e & g);
             uint32_t tmp1 = h + S1 + ch + kShaK[i] + w[i];
@@ -179,9 +178,9 @@ private:
     }
     kbuf.resize(64, 0);
 
-    for (int i = 0; i < 64; ++i) {
-        k_ipad[i] = kbuf[i] ^ 0x36;
-        k_opad[i] = kbuf[i] ^ 0x5C;
+    for (std::size_t i = 0; i < 64; ++i) {
+        k_ipad[i] = kbuf[i] ^ 0x36u;
+        k_opad[i] = kbuf[i] ^ 0x5Cu;
     }
 
     Sha256 inner;

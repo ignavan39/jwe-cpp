@@ -17,7 +17,6 @@
 #include <iomanip>
 #include <iostream>
 
-// ─── Вспомогательная функция вывода ────────────────────────────────────────
 
 static void printSeparator(const char* title = nullptr) {
     std::cout << "\n";
@@ -109,8 +108,9 @@ int main() {
         }
 
         std::cout << "\n┌─ Полный токен ─────────────────────────────────────┐\n";
+        // Печатаем по 72 символа в строке
         for (std::size_t i = 0; i < compact.size(); i += 72)
-            std::cout << compact.substr(i, 72) << '\n';
+            std::cout << "│ " << compact.substr(i, 72) << '\n';
         std::cout << "└────────────────────────────────────────────────────┘\n";
 
         // ── Статистика ────────────────────────────────────────────────────

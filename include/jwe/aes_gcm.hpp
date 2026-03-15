@@ -70,7 +70,7 @@ class Aes256 {
 public:
     static constexpr std::size_t kKeySize   = 32;
     static constexpr std::size_t kBlockSize = 16;
-    static constexpr int         kRounds    = 14;
+    static constexpr std::size_t kRounds    = 14;
 
     using Block = std::array<uint8_t, kBlockSize>;
 
@@ -82,8 +82,8 @@ public:
 
     /// Зашифровать один блок (ECB, in-place)
     void encryptBlock(Block& block) const noexcept {
-        addRoundKey(block, 0);
-        for (int r = 1; r < kRounds; ++r) {
+        addRoundKey(block, 0u);
+        for (std::size_t r = 1u; r < kRounds; ++r) {
             subBytes(block);
             shiftRows(block);
             mixColumns(block);
@@ -99,18 +99,18 @@ private:
     std::array<uint32_t, (kRounds + 1) * 4> rk_{};
 
     void keyExpansion(ByteSpan key) noexcept {
-        for (int i = 0; i < 8; ++i)
-            rk_[i] = (uint32_t(key[i*4])   << 24) | (uint32_t(key[i*4+1]) << 16) |
-                     (uint32_t(key[i*4+2]) <<  8) |  uint32_t(key[i*4+3]);
+        for (std::size_t i = 0; i < 8u; ++i)
+            rk_[i] = (uint32_t(key[i*4u])    << 24) | (uint32_t(key[i*4u+1u]) << 16) |
+                     (uint32_t(key[i*4u+2u]) <<  8) |  uint32_t(key[i*4u+3u]);
 
-        for (int i = 8; i < (kRounds + 1) * 4; ++i) {
-            uint32_t t = rk_[i - 1];
-            if (i % 8 == 0) {
-                t = subWord(rotWord(t)) ^ (uint32_t(detail::kRcon[i/8]) << 24);
-            } else if (i % 8 == 4) {
+        for (std::size_t i = 8u; i < (kRounds + 1u) * 4u; ++i) {
+            uint32_t t = rk_[i - 1u];
+            if (i % 8u == 0u) {
+                t = subWord(rotWord(t)) ^ (uint32_t(detail::kRcon[i/8u]) << 24);
+            } else if (i % 8u == 4u) {
                 t = subWord(t);
             }
-            rk_[i] = rk_[i - 8] ^ t;
+            rk_[i] = rk_[i - 8u] ^ t;
         }
     }
 
@@ -119,19 +119,19 @@ private:
     }
 
     static uint32_t subWord(uint32_t w) noexcept {
-        return (uint32_t(detail::kSBox[(w >> 24) & 0xff]) << 24) |
-               (uint32_t(detail::kSBox[(w >> 16) & 0xff]) << 16) |
-               (uint32_t(detail::kSBox[(w >>  8) & 0xff]) <<  8) |
-                uint32_t(detail::kSBox[ w        & 0xff]);
+        return (uint32_t(detail::kSBox[(w >> 24) & 0xffu]) << 24) |
+               (uint32_t(detail::kSBox[(w >> 16) & 0xffu]) << 16) |
+               (uint32_t(detail::kSBox[(w >>  8) & 0xffu]) <<  8) |
+                uint32_t(detail::kSBox[ w        & 0xffu]);
     }
 
-    void addRoundKey(Block& b, int round) const noexcept {
-        for (int c = 0; c < 4; ++c) {
-            uint32_t k = rk_[round * 4 + c];
-            b[c*4+0] ^= uint8_t(k >> 24);
-            b[c*4+1] ^= uint8_t(k >> 16);
-            b[c*4+2] ^= uint8_t(k >>  8);
-            b[c*4+3] ^= uint8_t(k);
+    void addRoundKey(Block& b, std::size_t round) const noexcept {
+        for (std::size_t c = 0; c < 4u; ++c) {
+            uint32_t k = rk_[round * 4u + c];
+            b[c*4u+0u] ^= uint8_t(k >> 24);
+            b[c*4u+1u] ^= uint8_t(k >> 16);
+            b[c*4u+2u] ^= uint8_t(k >>  8);
+            b[c*4u+3u] ^= uint8_t(k);
         }
     }
 
@@ -147,12 +147,12 @@ private:
 
     static void mixColumns(Block& b) noexcept {
         using namespace detail;
-        for (int c = 0; c < 4; ++c) {
-            uint8_t s0 = b[c*4], s1 = b[c*4+1], s2 = b[c*4+2], s3 = b[c*4+3];
-            b[c*4+0] = gf_mul(0x02,s0)^gf_mul(0x03,s1)^s2^s3;
-            b[c*4+1] = s0^gf_mul(0x02,s1)^gf_mul(0x03,s2)^s3;
-            b[c*4+2] = s0^s1^gf_mul(0x02,s2)^gf_mul(0x03,s3);
-            b[c*4+3] = gf_mul(0x03,s0)^s1^s2^gf_mul(0x02,s3);
+        for (std::size_t c = 0; c < 4u; ++c) {
+            uint8_t s0 = b[c*4u], s1 = b[c*4u+1u], s2 = b[c*4u+2u], s3 = b[c*4u+3u];
+            b[c*4u+0u] = gf_mul(0x02,s0)^gf_mul(0x03,s1)^s2^s3;
+            b[c*4u+1u] = s0^gf_mul(0x02,s1)^gf_mul(0x03,s2)^s3;
+            b[c*4u+2u] = s0^s1^gf_mul(0x02,s2)^gf_mul(0x03,s3);
+            b[c*4u+3u] = gf_mul(0x03,s0)^s1^s2^gf_mul(0x02,s3);
         }
     }
 };
@@ -179,16 +179,16 @@ inline void gf128_mul(
     z.fill(0);
     std::array<uint8_t,16> v = y;
 
-    for (int i = 0; i < 16; ++i) {
+    for (std::size_t i = 0; i < 16u; ++i) {
         for (int bit = 7; bit >= 0; --bit) {
-            if (x[i] & (1 << bit)) {
-                for (int j = 0; j < 16; ++j) z[j] ^= v[j];
+            if (x[i] & (uint8_t(1) << bit)) {
+                for (std::size_t j = 0; j < 16u; ++j) z[j] ^= v[j];
             }
-            bool lsb = v[15] & 1;
+            bool lsb = v[15] & 1u;
             // Сдвиг v вправо на 1 бит
-            for (int j = 15; j > 0; --j) v[j] = uint8_t((v[j] >> 1) | (v[j-1] << 7));
+            for (std::size_t j = 15u; j > 0u; --j) v[j] = uint8_t((v[j] >> 1) | (v[j-1u] << 7));
             v[0] >>= 1;
-            if (lsb) v[0] ^= 0xe1; // редукция: x^128 = x^7+x^2+x+1 => 0xe1000...0
+            if (lsb) v[0] ^= 0xe1u;
         }
     }
 }
@@ -232,7 +232,7 @@ inline void gf128_mul(
     result.ciphertext.resize(plaintext.size());
 
     auto incr32 = [](Aes256::Block& cb) {
-        for (int i = 15; i >= 12; --i)
+        for (std::size_t i = 15u; i >= 12u; --i)
             if (++cb[i] != 0) break;
     };
 
@@ -258,20 +258,20 @@ inline void gf128_mul(
 
     auto ghash_update = [&](std::array<uint8_t,16>& tag_val,
                             ByteSpan data) {
-        std::size_t full = data.size() / 16;
+        std::size_t full = data.size() / 16u;
         for (std::size_t i = 0; i < full; ++i) {
-            for (int j = 0; j < 16; ++j)
-                tag_val[j] ^= data[i*16 + j];
+            for (std::size_t j = 0; j < 16u; ++j)
+                tag_val[j] ^= data[i*16u + j];
             std::array<uint8_t,16> tmp{};
             detail::gf128_mul(tag_val, Harr, tmp);
             tag_val = tmp;
         }
-        std::size_t rem = data.size() % 16;
+        std::size_t rem = data.size() % 16u;
         if (rem) {
             std::array<uint8_t,16> padded{};
-            std::copy(data.begin() + static_cast<std::ptrdiff_t>(full*16),
+            std::copy(data.begin() + static_cast<std::ptrdiff_t>(full*16u),
                       data.end(), padded.begin());
-            for (int j = 0; j < 16; ++j) tag_val[j] ^= padded[j];
+            for (std::size_t j = 0; j < 16u; ++j) tag_val[j] ^= padded[j];
             std::array<uint8_t,16> tmp{};
             detail::gf128_mul(tag_val, Harr, tmp);
             tag_val = tmp;
@@ -284,13 +284,13 @@ inline void gf128_mul(
 
     // Финальный блок длин (64-bit big-endian * 2)
     std::array<uint8_t,16> len_block{};
-    uint64_t aad_bits = uint64_t(aad.size()) * 8;
-    uint64_t ct_bits  = uint64_t(result.ciphertext.size()) * 8;
-    for (int i = 7; i >= 0; --i) {
-        len_block[i]     = uint8_t(aad_bits >> ((7-i)*8));
-        len_block[8 + i] = uint8_t(ct_bits  >> ((7-i)*8));
+    uint64_t aad_bits = uint64_t(aad.size()) * 8u;
+    uint64_t ct_bits  = uint64_t(result.ciphertext.size()) * 8u;
+    for (std::size_t i = 0; i < 8u; ++i) {
+        len_block[i]      = uint8_t(aad_bits >> ((7u - i) * 8u));
+        len_block[8u + i] = uint8_t(ct_bits  >> ((7u - i) * 8u));
     }
-    for (int j = 0; j < 16; ++j) tag_val[j] ^= len_block[j];
+    for (std::size_t j = 0; j < 16u; ++j) tag_val[j] ^= len_block[j];
     {
         std::array<uint8_t,16> tmp{};
         detail::gf128_mul(tag_val, Harr, tmp);
@@ -300,7 +300,7 @@ inline void gf128_mul(
     // T = MSB_t(GCTR(J0, S))
     Aes256::Block ej0 = J0;
     aes.encryptBlock(ej0);
-    for (int j = 0; j < 16; ++j) tag_val[j] ^= ej0[j];
+    for (std::size_t j = 0; j < 16u; ++j) tag_val[j] ^= ej0[j];
 
     std::copy(tag_val.begin(), tag_val.end(), result.tag.begin());
     return result;

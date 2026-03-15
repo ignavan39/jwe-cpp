@@ -118,7 +118,7 @@ struct ParsedUrl {
     char buf[4096];
     ssize_t n;
     while ((n = recv(fd, buf, sizeof(buf), 0)) > 0)
-        response.append(buf, n);
+        response.append(buf, static_cast<std::size_t>(n));
     close(fd);
 
     // Извлекаем тело (после двойного CRLF)

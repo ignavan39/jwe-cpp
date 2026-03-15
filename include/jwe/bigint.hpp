@@ -33,25 +33,29 @@ public:
     [[nodiscard]] static BigInt fromBytes(ByteSpan b) {
         BigInt r;
         r.d_.clear();
-        // Обрабатываем по 4 байта в little-endian порядке цифр
-        for (std::ptrdiff_t i = (std::ptrdiff_t)b.size() - 4; i >= 0; i -= 4) {
-            uint32_t word = (uint32_t(b[i])   << 24) | (uint32_t(b[i+1]) << 16) |
-                            (uint32_t(b[i+2]) <<  8) |  uint32_t(b[i+3]);
-            r.d_.push_back(word);
+        std::size_t sz = b.size();
+        if (sz >= 4u) {
+            std::size_t i = sz - 4u;
+            while (true) {
+                uint32_t word = (uint32_t(b[i])    << 24) | (uint32_t(b[i+1u]) << 16) |
+                                (uint32_t(b[i+2u]) <<  8) |  uint32_t(b[i+3u]);
+                r.d_.push_back(word);
+                if (i < 4u) break;
+                i -= 4u;
+            }
         }
         // Остаток (если длина не кратна 4)
-        std::size_t rem = b.size() % 4;
+        std::size_t rem = sz % 4u;
         if (rem) {
             uint32_t word = 0;
             for (std::size_t j = 0; j < rem; ++j)
-                word = (word << 8) | b[j];
+                word = (word << 8u) | b[j];
             r.d_.push_back(word);
         }
         r.trim();
         return r;
     }
 
-    /// Экспорт в big-endian байты (ведущие нули обрезаются, если !padTo)
     [[nodiscard]] Bytes toBytes(std::size_t padTo = 0) const {
         Bytes out;
         for (auto it = d_.rbegin(); it != d_.rend(); ++it) {
@@ -60,7 +64,6 @@ public:
             out.push_back(uint8_t(*it >>  8));
             out.push_back(uint8_t(*it));
         }
-        // Убираем ведущие нули
         while (out.size() > 1 && out.front() == 0) out.erase(out.begin());
         // Паддинг нулями слева до нужной длины
         if (out.size() < padTo)
@@ -77,7 +80,7 @@ public:
     [[nodiscard]] std::strong_ordering operator<=>(const BigInt& o) const noexcept {
         if (d_.size() != o.d_.size())
             return d_.size() <=> o.d_.size();
-        for (auto i = (std::ptrdiff_t)d_.size() - 1; i >= 0; --i)
+        for (std::size_t i = d_.size(); i-- > 0u;)
             if (d_[i] != o.d_[i]) return d_[i] <=> o.d_[i];
         return std::strong_ordering::equal;
     }
@@ -98,13 +101,14 @@ public:
         BigInt q, r;
         q.d_.resize(a.d_.size(), 0);
 
-        for (std::ptrdiff_t i = (std::ptrdiff_t)a.d_.size() * 32 - 1; i >= 0; --i) {
+        std::size_t total = a.d_.size() * 32u;
+        for (std::size_t i = total; i-- > 0u;) {
             r = shl1(r);
-            if ((a.d_[i/32] >> (i%32)) & 1)
-                r.d_[0] |= 1;
+            if ((a.d_[i/32u] >> (i%32u)) & 1u)
+                r.d_[0] |= 1u;
             if (!(r < m)) {
                 r = sub(r, m);
-                q.d_[i/32] |= (1u << (i%32));
+                q.d_[i/32u] |= (1u << (i%32u));
             }
         }
         q.trim();
@@ -130,10 +134,10 @@ public:
         BigInt result(1);
         BigInt b = base % m;
 
-        std::size_t bits = exp.d_.size() * 32;
-        for (std::ptrdiff_t i = (std::ptrdiff_t)bits - 1; i >= 0; --i) {
+        std::size_t bits = exp.d_.size() * 32u;
+        for (std::size_t i = bits; i-- > 0u;) {
             result = mul(result, result) % m;
-            if ((exp.d_[i/32] >> (i%32)) & 1)
+            if ((exp.d_[i/32u] >> (i%32u)) & 1u)
                 result = mul(result, b) % m;
         }
         return result;

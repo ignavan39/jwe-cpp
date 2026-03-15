@@ -7,6 +7,7 @@ on:
     branches: [ master ]
 
 jobs:
+  # ─── Linux / GCC 13 ───────────────────────────────────────────────────
   build-linux-gcc:
     name: Linux · GCC 13 · C++23
     runs-on: ubuntu-24.04
@@ -32,6 +33,7 @@ jobs:
       - name: Тесты
         run: cd build && ctest --output-on-failure
 
+  # ─── Linux / Clang 17 ─────────────────────────────────────────────────
   build-linux-clang:
     name: Linux · Clang 17 · C++23
     runs-on: ubuntu-24.04
@@ -57,6 +59,7 @@ jobs:
       - name: Тесты
         run: cd build && ctest --output-on-failure
 
+  # ─── macOS / AppleClang ───────────────────────────────────────────────
   build-macos:
     name: macOS · AppleClang · C++23
     runs-on: macos-14
@@ -76,6 +79,7 @@ jobs:
       - name: Тесты
         run: cd build && ctest --output-on-failure
 
+  # ─── AddressSanitizer ─────────────────────────────────────────────────
   sanitize:
     name: ASan + UBSan · GCC 13
     runs-on: ubuntu-24.04
@@ -101,6 +105,7 @@ jobs:
       - name: Тесты с санитайзерами
         run: cd build && ctest --output-on-failure
 
+  # ─── Docker ───────────────────────────────────────────────────────────
   docker:
     name: Docker build
     runs-on: ubuntu-24.04

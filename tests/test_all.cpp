@@ -26,6 +26,13 @@
 #include <stdexcept>
 #include <string>
 
+// ─── Вспомогательная функция: создать ByteSpan из строкового литерала ─────
+
+/// Безопасный способ создать ByteSpan из char-строки без C-cast предупреждений
+static inline jwe::ByteSpan toSpan(const char* s, std::size_t n) noexcept {
+    return jwe::ByteSpan{reinterpret_cast<const uint8_t*>(s), n};
+}
+
 // ─── Мини-фреймворк ────────────────────────────────────────────────────────
 
 namespace test {
@@ -85,11 +92,11 @@ static void testBase64Url() {
 
     // RFC 4648 §10 тест-векторы (BASE64, адаптированные под URL-алфавит)
     TEST("encode empty",    encode(jwe::ByteSpan{}) == "");
-    TEST("encode 'f'",      encode(jwe::ByteSpan{(const uint8_t*)"f",1}) == "Zg");
-    TEST("encode 'fo'",     encode(jwe::ByteSpan{(const uint8_t*)"fo",2}) == "Zm8");
-    TEST("encode 'foo'",    encode(jwe::ByteSpan{(const uint8_t*)"foo",3}) == "Zm9v");
-    TEST("encode 'foob'",   encode(jwe::ByteSpan{(const uint8_t*)"foob",4}) == "Zm9vYg");
-    TEST("encode 'foobar'", encode(jwe::ByteSpan{(const uint8_t*)"foobar",6}) == "Zm9vYmFy");
+    TEST("encode 'f'",      encode(toSpan("f",1)) == "Zg");
+    TEST("encode 'fo'",     encode(toSpan("fo",2)) == "Zm8");
+    TEST("encode 'foo'",    encode(toSpan("foo",3)) == "Zm9v");
+    TEST("encode 'foob'",   encode(toSpan("foob",4)) == "Zm9vYg");
+    TEST("encode 'foobar'", encode(toSpan("foobar",6)) == "Zm9vYmFy");
 
     // Символы '-' и '_' вместо '+' и '/'
     jwe::Bytes tricky = {0xFB, 0xFF, 0xFE};
@@ -118,7 +125,7 @@ static void testSha256() {
     using jwe::crypto::Sha256;
 
     // FIPS 180-4 / OpenSSL verified: SHA-256("abc")
-    auto d1 = Sha256::hash(jwe::ByteSpan{(const uint8_t*)"abc", 3});
+    auto d1 = Sha256::hash(toSpan("abc",3));
     TEST("SHA-256('abc')",
         test::hex(d1) ==
         "ba7816bf8f01cfea414140de5dae2223"
@@ -133,7 +140,7 @@ static void testSha256() {
 
     // SHA-256("abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq")
     const char* msg = "abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq";
-    auto d3 = Sha256::hash(jwe::ByteSpan{(const uint8_t*)msg, std::strlen(msg)});
+    auto d3 = Sha256::hash(toSpan(msg,std::strlen(msg)));
     TEST("SHA-256(448-bit msg)",
         test::hex(d3) ==
         "248d6a61d20638b8e5c026930c3e6039"
@@ -141,8 +148,8 @@ static void testSha256() {
 
     // Инкрементальное обновление
     jwe::crypto::Sha256 h;
-    h.update(jwe::ByteSpan{(const uint8_t*)"ab", 2});
-    h.update(jwe::ByteSpan{(const uint8_t*)"c", 1});
+    h.update(toSpan("ab",2));
+    h.update(toSpan("c",1));
     TEST("SHA-256 incremental == SHA-256('abc')", h.finalize() == d1);
 }
 
@@ -156,7 +163,7 @@ static void testHmacSha256() {
     jwe::Bytes key(20, 0x0b);
     const char* data = "Hi There";
     auto mac = hmac_sha256(jwe::ByteSpan{key},
-                           jwe::ByteSpan{(const uint8_t*)data, 8});
+                           toSpan(data,8));
     TEST("HMAC-SHA-256 RFC4231 TC1",
         test::hex(mac) ==
         "b0344c61d8db38535ca8afceaf0bf12b"

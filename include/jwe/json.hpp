@@ -35,7 +35,7 @@ using Bool   = bool;
 using Number = double;
 using String = std::string;
 using Array  = std::vector<Value>;
-using Object = std::map<std::string, Value, std::less<>>;
+using Object = std::map<std::string, Value>;
 
 struct Value : std::variant<Null, Bool, Number, String, Array, Object> {
     using variant::variant;
@@ -66,7 +66,7 @@ struct Value : std::variant<Null, Bool, Number, String, Array, Object> {
 
     [[nodiscard]] const Value& operator[](std::string_view key) const {
         const auto& obj = asObject();
-        auto it = obj.find(key);
+        auto it = obj.find(std::string(key));
         if (it == obj.end())
             throw ParseError(std::string("JSON: ключ не найден: ") + std::string(key));
         return it->second;
@@ -75,7 +75,7 @@ struct Value : std::variant<Null, Bool, Number, String, Array, Object> {
     [[nodiscard]] bool has(std::string_view key) const noexcept {
         if (!isObject()) return false;
         const auto& obj = std::get<Object>(*this);
-        return obj.find(key) != obj.end();
+        return obj.find(std::string(key)) != obj.end();
     }
 };
 

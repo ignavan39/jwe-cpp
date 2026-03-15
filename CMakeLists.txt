@@ -7,12 +7,15 @@ project(
     LANGUAGES CXX
 )
 
+# ─── Стандарт C++23 ────────────────────────────────────────────────────────
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+# ─── Экспорт compile_commands.json (для clangd, IDE) ──────────────────────
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
+# ─── Предупреждения ────────────────────────────────────────────────────────
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
     add_compile_options(
         -Wall -Wextra -Wpedantic
@@ -27,6 +30,7 @@ elseif(MSVC)
     add_compile_options(/W4 /permissive-)
 endif()
 
+# ─── Опции сборки ──────────────────────────────────────────────────────────
 option(JWE_BUILD_TESTS    "Собрать тесты"          ON)
 option(JWE_BUILD_EXAMPLES "Собрать примеры"         ON)
 option(JWE_BUILD_SANITIZE "Включить AddressSanitizer (Debug)" OFF)
@@ -36,6 +40,7 @@ if(JWE_BUILD_SANITIZE AND CMAKE_BUILD_TYPE STREQUAL "Debug")
     add_link_options(-fsanitize=address,undefined)
 endif()
 
+# ─── Header-only библиотека ────────────────────────────────────────────────
 add_library(jwe INTERFACE)
 add_library(jwe::jwe ALIAS jwe)
 
@@ -54,6 +59,7 @@ if(JWE_BUILD_TESTS)
     add_executable(jwe_tests tests/test_all.cpp)
     target_link_libraries(jwe_tests PRIVATE jwe::jwe)
 
+    # CTest интеграция
     add_test(NAME jwe_unit_tests COMMAND jwe_tests)
     set_tests_properties(jwe_unit_tests PROPERTIES
         LABELS "unit"
@@ -61,6 +67,7 @@ if(JWE_BUILD_TESTS)
     )
 endif()
 
+# ─── Примеры ───────────────────────────────────────────────────────────────
 if(JWE_BUILD_EXAMPLES)
     add_executable(basic_usage   examples/basic_usage.cpp)
     add_executable(jwe_encrypt   examples/encrypt_payload.cpp)
@@ -68,11 +75,13 @@ if(JWE_BUILD_EXAMPLES)
     target_link_libraries(basic_usage PRIVATE jwe::jwe)
     target_link_libraries(jwe_encrypt PRIVATE jwe::jwe)
 
+    # На Linux подключаем POSIX-сокеты
     if(UNIX)
         target_compile_definitions(jwe_encrypt PRIVATE _POSIX_C_SOURCE=200112L)
     endif()
 endif()
 
+# ─── Установка ─────────────────────────────────────────────────────────────
 include(GNUInstallDirs)
 include(CMakePackageConfigHelpers)
 
@@ -109,6 +118,7 @@ install(FILES
     DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/jwe
 )
 
+# ─── Информационный вывод ──────────────────────────────────────────────────
 message(STATUS "")
 message(STATUS "  jwe-cpp v${PROJECT_VERSION}")
 message(STATUS "  Компилятор : ${CMAKE_CXX_COMPILER_ID} ${CMAKE_CXX_COMPILER_VERSION}")
