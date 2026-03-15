@@ -1,0 +1,114 @@
+name: CI
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build-linux-gcc:
+    name: Linux · GCC 13 · C++23
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Установка зависимостей
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y g++-13 cmake
+
+      - name: Конфигурация CMake
+        run: |
+          cmake -B build \
+                -DCMAKE_CXX_COMPILER=g++-13 \
+                -DCMAKE_BUILD_TYPE=Release   \
+                -DJWE_BUILD_TESTS=ON         \
+                -DJWE_BUILD_EXAMPLES=ON
+
+      - name: Сборка
+        run: cmake --build build --parallel
+
+      - name: Тесты
+        run: cd build && ctest --output-on-failure
+
+  build-linux-clang:
+    name: Linux · Clang 17 · C++23
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Установка зависимостей
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang-17 cmake
+
+      - name: Конфигурация CMake
+        run: |
+          cmake -B build \
+                -DCMAKE_CXX_COMPILER=clang++-17 \
+                -DCMAKE_BUILD_TYPE=Release       \
+                -DJWE_BUILD_TESTS=ON             \
+                -DJWE_BUILD_EXAMPLES=ON
+
+      - name: Сборка
+        run: cmake --build build --parallel
+
+      - name: Тесты
+        run: cd build && ctest --output-on-failure
+
+  build-macos:
+    name: macOS · AppleClang · C++23
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Конфигурация CMake
+        run: |
+          cmake -B build \
+                -DCMAKE_BUILD_TYPE=Release \
+                -DJWE_BUILD_TESTS=ON       \
+                -DJWE_BUILD_EXAMPLES=ON
+
+      - name: Сборка
+        run: cmake --build build --parallel
+
+      - name: Тесты
+        run: cd build && ctest --output-on-failure
+
+  sanitize:
+    name: ASan + UBSan · GCC 13
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Установка зависимостей
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y g++-13 cmake
+
+      - name: Конфигурация CMake (Debug + Sanitizers)
+        run: |
+          cmake -B build \
+                -DCMAKE_CXX_COMPILER=g++-13  \
+                -DCMAKE_BUILD_TYPE=Debug      \
+                -DJWE_BUILD_TESTS=ON          \
+                -DJWE_BUILD_SANITIZE=ON
+
+      - name: Сборка
+        run: cmake --build build --parallel
+
+      - name: Тесты с санитайзерами
+        run: cd build && ctest --output-on-failure
+
+  docker:
+    name: Docker build
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Сборка Docker-образа (включая тесты)
+        run: docker build -t jwe-cpp:ci .
+
+      - name: Запуск демо в контейнере
+        run: docker run --rm jwe-cpp:ci
